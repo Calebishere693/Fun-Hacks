@@ -1,68 +1,74 @@
-local IGNORE_FILE = "ServerHop.txt"
-local HOUR = 3600
-
-local Module = {}
-
-local HttpService, TeleportService = game:GetService"HttpService", game:GetService"TeleportService"
-
-local function GET()
-    if not isfile(IGNORE_FILE) then return {} end
-    local list = {}
-    local now = os.time()
-    for _, line in next, readfile(IGNORE_FILE):split("\n") do
-        local pmo, ts = line:match("([^|]+)|?(%d*)")
-        ts = tonumber(ts) or 0
-        if now - ts < HOUR then list[pmo] = ts end
-    end
-    return list
+--[[
+	WARNING: Heads up! This script has not been verified by ScriptBlox. Use at your own risk!
+]]
+local PlaceID = game.PlaceId
+local AllIDs = {}
+local foundAnything = ""
+local actualHour = os.date("!*t").hour
+local Deleted = false
+local File = pcall(function()
+    AllIDs = game:GetService('HttpService'):JSONDecode(readfile("NotSameServers.json"))
+end)
+if not File then
+    table.insert(AllIDs, actualHour)
+    writefile("NotSameServers.json", game:GetService('HttpService'):JSONEncode(AllIDs))
 end
-
-local function Update(List)
-    local sybau = {}
-    for ts, pmo in next, List do
-        table.insert(sybau, ts .. "|" .. pmo)
+function TPReturner()
+    local Site;
+    if foundAnything == "" then
+        Site = game.HttpService:JSONDecode(game:HttpGet('https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Asc&limit=100'))
+    else
+        Site = game.HttpService:JSONDecode(game:HttpGet('https://games.roblox.com/v1/games/' .. PlaceID .. '/servers/Public?sortOrder=Asc&limit=100&cursor=' .. foundAnything))
     end
-    writefile(IGNORE_FILE, table.concat(sybau, "\n"))
-end
-
-local IgnoredServers = GET()
-
-function Module:GetServers(Sort)
-    Sort = Sort or { ping = true, fps = false, asc = false }
-    
-    local cursor = ""
-    while true do
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(game:HttpGet(`https://games.roblox.com/v1/games/{game.PlaceId}/servers/Public?limit=100&sortOrder={(Sort.asc and "Asc" or "Desc")}&excludeFullGames=true&cursor={cursor}`))
-        end)
-        
-        if not success or not result or not result.data then error("server error (not success or no result or no data)") end
-
-        local ServersList = result.data
-
-        table.sort(ServersList, function(a, b)
-            if Sort.ping and Sort.fps then
-                return a.ping == b.ping and a.fps > b.fps or a.ping < b.ping
-            elseif Sort.ping then
-                return a.ping < b.ping
-            elseif Sort.fps then
-                return a.fps > b.fps
+    local ID = ""
+    if Site.nextPageCursor and Site.nextPageCursor ~= "null" and Site.nextPageCursor ~= nil then
+        foundAnything = Site.nextPageCursor
+    end
+    local num = 0;
+    for i,v in pairs(Site.data) do
+        local Possible = true
+        ID = tostring(v.id)
+        if tonumber(v.maxPlayers) > tonumber(v.playing) then
+            for _,Existing in pairs(AllIDs) do
+                if num ~= 0 then
+                    if ID == tostring(Existing) then
+                        Possible = false
+                    end
+                else
+                    if tonumber(actualHour) ~= tonumber(Existing) then
+                        local delFile = pcall(function()
+                            delfile("NotSameServers.json")
+                            AllIDs = {}
+                            table.insert(AllIDs, actualHour)
+                        end)
+                    end
+                end
+                num = num + 1
             end
-        end)
-
-        for _, Server in next, ServersList do
-            if not IgnoredServers[Server.id] then
-                IgnoredServers[Server.id] = os.time()
-                Update(IgnoredServers)
-
-                return TeleportService:TeleportToPlaceInstance(game.PlaceId, Server.id, game:GetService("Players").LocalPlayer)
+            if Possible == true then
+                table.insert(AllIDs, ID)
+                wait()
+                pcall(function()
+                    writefile("NotSameServers.json", game:GetService('HttpService'):JSONEncode(AllIDs))
+                    wait()
+                    game:GetService("TeleportService"):TeleportToPlaceInstance(PlaceID, ID, game.Players.LocalPlayer)
+                end)
+                wait(4)
             end
         end
-
-        assert(result.nextPageCursor, "No server found.")
-
-        cursor = result.nextPageCursor
     end
 end
 
-return Module
+function Teleport()
+    while wait() do
+        pcall(function()
+            TPReturner()
+            if foundAnything ~= "" then
+                TPReturner()
+            end
+        end)
+    end
+end
+
+-- If you'd like to use a script before server hopping (Like a Automatic Chest collector you can put the Teleport() after it collected everything.
+Teleport()
